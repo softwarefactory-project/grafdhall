@@ -1,100 +1,79 @@
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedLists #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 
 module Main (main) where
 
-import Data.Aeson
-import qualified Data.ByteString.Lazy as LBS
+import Data.Aeson (Value (Array, Bool, Number, Object, String), encode)
+import qualified Data.ByteString.Char8 as BS
 import qualified Data.HashMap.Strict as HM
+import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
-import qualified Data.Text.IO as T
-import qualified Data.Vector as V
-import Dhall
-import Grafana
+import Dhall (inputExpr)
+import Dhall.JSON (convertToHomogeneousMaps, defaultConversion, dhallToJSON, omitNull)
+import Network.HTTP.Client
+  ( RequestBody (RequestBodyLBS),
+    Response (responseStatus),
+    applyBasicAuth,
+    httpNoBody,
+    method,
+    parseRequest,
+    requestBody,
+    requestHeaders,
+  )
+import Network.HTTP.Client.TLS (newTlsManager)
+import Network.HTTP.Types (Status (statusCode))
+import System.Environment (getArgs, getEnv)
 
-tenants :: FilePath -> IO [Text]
-tenants = inputFile auto
-
-data InfluxTag = InfluxTag
-  {key :: Text, operator :: Text, value :: Text}
-  deriving stock (Eq, Show, Generic)
-
-instance ToJSON InfluxTag
-
-data InfluxGroupBy = InfluxGroupBy
-  { _params :: [Text],
-    _type :: Text
-  }
-  deriving stock (Eq, Show, Generic)
-
-instance ToJSON InfluxGroupBy where
-  toJSON InfluxGroupBy {..} =
-    object
-      [ "params" .= _params,
-        "type" .= _type
-      ]
-
-data InfluxQuery = InfluxQuery
-  { groupBy :: [InfluxGroupBy],
-    select :: [[InfluxGroupBy]],
-    measurement :: Text,
-    orderByTime :: Text,
-    policy :: Text,
-    resultFormat :: Text,
-    refId :: Text,
-    query :: Text,
-    rawQuery :: Bool,
-    tags :: [InfluxTag]
-  }
-  deriving stock (Eq, Show, Generic)
-
-gaugeQuery :: Text -> InfluxQuery
-gaugeQuery measurement = InfluxQuery {..}
+postDashboard :: Value -> IO ()
+postDashboard dashboard = do
+  grafanaUrl <- getEnv "GRAFANA_URL"
+  grafanaToken <- BS.pack <$> getEnv "GRAFANA_TOKEN"
+  initReq <- parseRequest $ grafanaUrl <> "/api/dashboards/db"
+  let req =
+        applyBasicAuth "admin" grafanaToken $
+          initReq
+            { method = "POST",
+              requestHeaders = [("Content-Type", "application/json")],
+              requestBody = RequestBodyLBS (encode body)
+            }
+  manager <- newTlsManager
+  resp <- httpNoBody req manager
+  case statusCode $ responseStatus resp of
+    200 -> putStrLn $ "Dashboard updated: " <> dashboardName
+    _ -> error $ "Got " <> show resp
   where
-    groupBy = [InfluxGroupBy ["$__interval"] "time", InfluxGroupBy ["0"] "fill"]
-    select = [[InfluxGroupBy ["value"] "field", InfluxGroupBy [] "first"]]
-    orderByTime = "DESC"
-    rawQuery = True
-    query = "SELECT last(\"value\") FROM \"" <> measurement <> "\" WHERE $timeFilter GROUP BY time($__interval) fill(0) ORDER BY time DESC\n"
-    refId = "A"
-    tags = [InfluxTag "metric_type" "=" "gauge"]
-    policy = "value"
-    resultFormat = "time_series"
+    getString :: Value -> String
+    getString = \case
+      String txt -> T.unpack txt
+      _ -> error "Not a string"
+    body =
+      Object
+        [ ("dashboard", dashboard),
+          ("folderId", Number 0),
+          ("overwrite", Bool True)
+        ]
+    dashboardName = getString $ case dashboard of
+      Object attrs -> fromMaybe (error "title missing") $ HM.lookup "title" attrs
+      _ -> error "Dashboard is not an object"
 
-instance ToJSON InfluxQuery
+postDashboards :: Value -> IO ()
+postDashboards = \case
+  Array xs -> mapM_ postDashboard xs
+  x -> postDashboard x
 
-addInfluxQuery :: InfluxQuery -> Value -> Value
-addInfluxQuery iq = go
-  where
-    go :: Value -> Value
-    go = \case
-      Object ks
-        | Just xs <- HM.lookup "panels" ks -> Object (HM.insert "panels" (go xs) ks)
-        | Just _ <- HM.lookup "targets" ks -> Object (HM.insert "targets" iqs ks)
-      Array xs -> Array (fmap go xs)
-      x -> x
-    iqs = Array $ V.fromList [toJSON iq]
-
-tenantDashboard :: Text -> Dashboard
-tenantDashboard name = defaultDashboard {dashboardTitle = name <> " dashboard", dashboardPanels = panels}
-  where
-    resourcesGraph =
-      defaultGraph
-        { graphTitle = "Resources",
-          graphUnit = Just SecondsFormat,
-          graphHasBars = True
-        }
-    panels =
-      [ graphPanel resourcesGraph (GridPos 12 24 0 0)
-      ]
+load :: FilePath -> IO ()
+load fp = do
+  confExpr <- inputExpr (T.pack fp)
+  case dhallToJSON (convertToHomogeneousMaps defaultConversion confExpr) of
+    Right v -> postDashboards (omitNull v)
+    Left err -> error ("Could not convert configuration to JSON: " <> show err)
 
 main :: IO ()
 main = do
-  tenantsDashboards <- fmap tenantDashboard <$> tenants "conf.dhall"
-  let iq = gaugeQuery "zuul.nodepool.resources.tenant.fedora.cores"
-  let iqDashboards = fmap (addInfluxQuery iq . toJSON) (take 1 tenantsDashboards)
-  mapM_ (T.putStrLn . T.decodeUtf8 . LBS.toStrict . encode) iqDashboards
+  args <- getArgs
+  case args of
+    ["--help"] -> putStrLn "usage: grafdhall ./conf.dhall"
+    [fp] -> load fp
+    _ -> putStrLn "usage: grafdhall ./conf.dhall"

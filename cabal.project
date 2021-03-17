@@ -1,6 +1,0 @@
-source-repository-package
-  type: git
-  location: git://github.com/rrruko/grafana.git
-  tag: bf67d3c973849e4d7513c677c9043091f699f293
-
-packages: ./

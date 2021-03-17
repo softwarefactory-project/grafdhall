@@ -17,12 +17,14 @@ tested-with:         GHC == 8.10.4
 common common-options
   build-depends:       base < 5
                      , aeson
-                     , dhall
-                     , grafana
-                     , unordered-containers
-                     , text
                      , bytestring
-                     , vector
+                     , dhall
+                     , dhall-json
+                     , http-client
+                     , http-client-tls
+                     , http-types
+                     , text
+                     , unordered-containers
 
   ghc-options:         -Wall
                        -Wcompat
