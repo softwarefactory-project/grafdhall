@@ -11,7 +11,7 @@ import qualified Data.HashMap.Strict as HM
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import Dhall (inputExpr)
-import Dhall.JSON (convertToHomogeneousMaps, defaultConversion, dhallToJSON, omitNull)
+import Dhall.JSON (Conversion (..), convertToHomogeneousMaps, dhallToJSON, omitNull)
 import Network.HTTP.Client
   ( RequestBody (RequestBodyLBS),
     Response (responseStatus),
@@ -24,15 +24,23 @@ import Network.HTTP.Client
   )
 import Network.HTTP.Client.TLS (newTlsManager)
 import Network.HTTP.Types (Status (statusCode))
-import System.Environment (getArgs, getEnv)
+import System.Environment (getArgs, getEnv, lookupEnv)
+
+defaultConversion :: Conversion
+defaultConversion =
+  Conversion
+    { mapKey = "mapKey",
+      mapValue = "mapValue"
+    }
 
 postDashboard :: Value -> IO ()
 postDashboard dashboard = do
   grafanaUrl <- getEnv "GRAFANA_URL"
-  grafanaToken <- BS.pack <$> getEnv "GRAFANA_TOKEN"
+  grafanaPass <- BS.pack <$> getEnv "GRAFANA_PASS"
+  grafanaUser <- BS.pack . fromMaybe "admin" <$> lookupEnv "GRAFANA_USER"
   initReq <- parseRequest $ grafanaUrl <> "/api/dashboards/db"
   let req =
-        applyBasicAuth "admin" grafanaToken $
+        applyBasicAuth grafanaUser grafanaPass $
           initReq
             { method = "POST",
               requestHeaders = [("Content-Type", "application/json")],
