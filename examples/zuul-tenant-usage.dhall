@@ -1,4 +1,5 @@
-let Grafana = ~/src/github.com/weeezes/dhall-grafana/package.dhall
+let Grafana =
+      https://raw.githubusercontent.com/weeezes/dhall-grafana/f78d2887939dcb555a47a4b85a91a3d6b38ec2ea/package.dhall sha256:a0e1b5432090944fa671efce0085c6049019ae0d00ca289c268b4528d1cd39af
 
 let Prelude =
       https://prelude.dhall-lang.org/v17.0.0/package.dhall sha256:10db3c919c25e9046833df897a8ffe2701dc390fa0893d958c3430524be5a43e
@@ -23,7 +24,8 @@ let gauge =
           , orderByTime = "ASC"
           , policy = "default"
           , refId = "A"
-          , alias = measurement
+          , rawQuery = False
+          , query = ""
           , resultFormat = "time_series"
           , select =
             [ [ { type = "field", params = [ "value" ] }
