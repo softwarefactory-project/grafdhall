@@ -6,8 +6,8 @@
 module Main (main) where
 
 import Data.Aeson (Value (Array, Bool, Number, Object, String), encode)
+import qualified Data.Aeson.KeyMap as HM (lookup)
 import qualified Data.ByteString.Char8 as BS
-import qualified Data.HashMap.Strict as HM
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import Dhall (inputExpr)
