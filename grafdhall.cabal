@@ -25,7 +25,7 @@ source-repository head
 
 common common-options
   build-depends:       base                   < 5
-                     , aeson
+                     , aeson >= 2
                      , bytestring
                      , dhall
                      , dhall-json
